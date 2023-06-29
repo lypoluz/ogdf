@@ -1390,8 +1390,7 @@ void describeTsplibXml() {
 			}
 		});
 		it("reads a directed 4 cycle", [&] {
-			const string data =
-					ResourceFile::data("fileformats/tsplibxml/valid/4cycle_directed.xml");
+			const string data = ResourceFile::data("fileformats/tsplibxml/valid/4cycle_directed.xml");
 			Graph G;
 			GraphAttributes GA;
 			stringstream ss {data};
