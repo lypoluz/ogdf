@@ -22,6 +22,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 
 #include <assert.h>
 #include <new>
+#include <utility>
 
 #include <ogdf/lib/minisat/mtl/IntTypes.h>
 #include <ogdf/lib/minisat/mtl/XAlloc.h>
@@ -31,8 +32,6 @@ namespace Internal {
 
 //=================================================================================================
 // Automatically resizable arrays
-//
-// NOTE! Don't use this vector on datatypes that cannot be re-located in memory (with realloc)
 
 template<class T>
 class vec {
@@ -47,11 +46,20 @@ class vec {
     // Helpers for calculating next capacity:
     static inline int  imax   (int x, int y) { int mask = (y-x) >> (sizeof(int)*8-1); return (x&mask) + (y&(~mask)); }
     //static inline void nextCap(int& cap){ cap += ((cap >> 1) + 2) & ~1; }
-    static inline void nextCap(int& cap){ cap += ((cap >> 1) + 2) & ~1; }
+	static inline void nextCap(int& cap) { cap += ((cap >> 1) + 2) & ~1; }
+
+    void copyFrom(const vec<T>& other) {
+        capacity(other.sz);
+        for (int i = 0; i < other.sz; ++i) {
+            new (&data[i]) T(other.data[i]);
+        }
+        sz = other.sz;
+    }
 
 public:
     // Constructors:
 	vec() : data(nullptr), sz(0), cap(0)    { }
+    vec(const vec<T>& other) : data(nullptr), sz(0), cap(0) { copyFrom(other); }
 	explicit vec(int size) : data(nullptr), sz(0), cap(0) { growTo(size); }
 	vec(int size, const T& pad) : data(nullptr), sz(0), cap(0) { growTo(size, pad); }
    ~vec() { clear(true); }
@@ -59,7 +67,17 @@ public:
     // Pointer to first element:
     operator T*       (void)           { return data; }
 
-    // Size operations:
+    // Assignment operator:
+    vec<T>& operator=(const vec<T>& other) {
+        if (this != &other) {
+            clear();
+            copyFrom(other);
+        }
+        return *this;
+    }
+
+
+	// Size operations:
     int      size     (void) const     { return sz; }
     void     shrink   (int nelems)     { assert(nelems <= sz); for (int i = 0; i < nelems; i++) sz--, data[sz].~T(); }
     void     shrink_  (int nelems)     { assert(nelems <= sz); sz -= nelems; }
@@ -92,14 +110,26 @@ public:
 };
 
 
+
 template<class T>
 void vec<T>::capacity(int min_cap) {
     if (cap >= min_cap) return;
     int add = imax((min_cap - cap + 1) & ~1, ((cap >> 1) + 2) & ~1);   // NOTE: grow by approximately 3/2
-	if (add > INT_MAX - cap || (((data = (T*)::realloc(data, (cap += add) * sizeof(T))) == nullptr) && errno == ENOMEM))
-        throw OutOfMemoryException();
- }
 
+    T* new_data = static_cast<T*>(::operator new((cap + add) * sizeof(T)));
+    if (new_data == nullptr)
+        throw OutOfMemoryException();
+
+    for (int i = 0; i < cap; ++i)
+        new (&new_data[i]) T(std::move(data[i]));  // Move-construct elements to the new memory block
+
+    for (int i = 0; i < cap; ++i)
+        data[i].~T();
+
+    ::operator delete(data);
+    data = new_data;
+    cap += add;
+}
 
 template<class T>
 void vec<T>::growTo(int size, const T& pad) {
